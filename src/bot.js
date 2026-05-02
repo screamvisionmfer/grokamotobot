@@ -1028,7 +1028,7 @@ async function sendStatsSignal(ctxOrChatId) {
   return ctxOrChatId.replyWithPhoto(photo, options);
 }
 
-bot.start(ctx => ctx.reply("Grokamotos bot online. Commands: /wallet /stats /mint /site /links /help"));
+bot.start(ctx => ctx.reply("Grokamotos bot online. Commands: /wallet /stats /lastmint /mint /site /links /help"));
 
 bot.help(ctx => ctx.reply([
   "OG Grokamoto commands:",
@@ -1106,6 +1106,7 @@ function telegramCommandsMenu() {
   return [
     { command: "wallet", description: "Wallet dashboard card" },
     { command: "stats", description: "Minted / supply stats" },
+    { command: "lastmint", description: "Latest minted Grokamoto" },
     { command: "mint", description: "Mint link" },
     { command: "site", description: "Project website" },
     { command: "links", description: "Useful links" },
