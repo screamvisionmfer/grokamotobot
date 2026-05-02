@@ -34,6 +34,13 @@ const DEFAULT_TOKEN_SIGNAL_GIF = "https://www.unofficialgrokamotos.com/effects/d
 const DEFAULT_DRB_DEX_URL = "https://dexscreener.com/base/0x5116773e18a9c7bb03ebb961b38678e45e238923";
 const DEFAULT_DRB_TOKEN_ADDRESS = "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2";
 const DEFAULT_DRB_BASESCAN_TOKEN_URL = `https://basescan.org/token/${DEFAULT_DRB_TOKEN_ADDRESS}`;
+const DEFAULT_BLOCKSCOUT_BASE_API = "https://base.blockscout.com/api/v2";
+
+function getDrbTokenAddress() {
+  if (env.DRB_TOKEN_ADDRESS) return env.DRB_TOKEN_ADDRESS;
+  const fromBaseScan = String(env.DRB_BASESCAN_TOKEN_URL || DEFAULT_DRB_BASESCAN_TOKEN_URL).match(/0x[a-fA-F0-9]{40}/)?.[0];
+  return fromBaseScan || DEFAULT_DRB_TOKEN_ADDRESS;
+}
 
 function envNum(name, fallback) {
   const raw = env[name];
@@ -837,7 +844,7 @@ async function scrapeBaseScanTokenData() {
 }
 
 async function getDexScreenerTokenData() {
-  const token = env.DRB_TOKEN_ADDRESS || DEFAULT_DRB_TOKEN_ADDRESS;
+  const token = getDrbTokenAddress();
   const url = env.DEXSCREENER_TOKEN_API || `https://api.dexscreener.com/latest/dex/tokens/${token}`;
   const res = await fetchWithTimeout(url, {
     headers: {
@@ -860,9 +867,39 @@ async function getDexScreenerTokenData() {
   };
 }
 
+function formatInteger(value) {
+  const raw = String(value ?? "").replace(/[^0-9]/g, "");
+  if (!raw) return "N/A";
+  const n = Number(raw);
+  return Number.isFinite(n) ? n.toLocaleString("en-US") : raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+async function getBlockScoutTokenData() {
+  const token = getDrbTokenAddress();
+  const base = String(env.BLOCKSCOUT_BASE_API || DEFAULT_BLOCKSCOUT_BASE_API).replace(/\/+$/, "");
+  const url = env.BLOCKSCOUT_TOKEN_INFO_URL || `${base}/tokens/${token}`;
+
+  const res = await fetchWithTimeout(url, {
+    headers: {
+      "user-agent": "Mozilla/5.0 grokamotos-bot",
+      "accept": "application/json"
+    }
+  }, envNum("BLOCKSCOUT_TIMEOUT_MS", 10000));
+
+  if (!res.ok) throw new Error(`Blockscout token info failed: ${res.status}`);
+  const json = await res.json();
+
+  return {
+    priceUsd: formatUsdPrice(json?.exchange_rate),
+    marketCap: formatUsdMarketCap(json?.circulating_market_cap),
+    holders: formatInteger(json?.holders_count)
+  };
+}
+
 async function getDrbMarketData() {
   let baseScan = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
   let dex = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
+  let blockScout = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
 
   try {
     baseScan = await scrapeBaseScanTokenData();
@@ -878,10 +915,18 @@ async function getDrbMarketData() {
     }
   }
 
+  if (baseScan.holders === "N/A" || (baseScan.priceUsd === "N/A" && dex.priceUsd === "N/A") || (baseScan.marketCap === "N/A" && dex.marketCap === "N/A")) {
+    try {
+      blockScout = await getBlockScoutTokenData();
+    } catch (e) {
+      console.error("Blockscout fallback error:", e.message);
+    }
+  }
+
   return {
-    priceUsd: baseScan.priceUsd !== "N/A" ? baseScan.priceUsd : dex.priceUsd,
-    marketCap: baseScan.marketCap !== "N/A" ? baseScan.marketCap : dex.marketCap,
-    holders: baseScan.holders
+    priceUsd: baseScan.priceUsd !== "N/A" ? baseScan.priceUsd : (dex.priceUsd !== "N/A" ? dex.priceUsd : blockScout.priceUsd),
+    marketCap: baseScan.marketCap !== "N/A" ? baseScan.marketCap : (dex.marketCap !== "N/A" ? dex.marketCap : blockScout.marketCap),
+    holders: baseScan.holders !== "N/A" ? baseScan.holders : blockScout.holders
   };
 }
 
@@ -1072,5 +1117,5 @@ export async function installTelegramCommandsMenu() {
   await bot.telegram.setMyCommands(telegramCommandsMenu());
 }
 
-export { bot, sendWalletSignal, sendStatsSignal, getDrbMarketData, scrapeBaseScanTokenData };
+export { bot, sendWalletSignal, sendStatsSignal, getDrbMarketData, scrapeBaseScanTokenData, getBlockScoutTokenData };
 export default bot;
