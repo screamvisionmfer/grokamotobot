@@ -1,0 +1,22 @@
+{
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "vercel dev",
+    "set-webhook": "node scripts/set-webhook.js",
+    "delete-webhook": "node scripts/delete-webhook.js",
+    "commands": "node src/index.js --commands"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.74",
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "name": "grokamoto-telegram-vercel-bot"
+}
