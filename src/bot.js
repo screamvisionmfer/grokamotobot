@@ -422,36 +422,117 @@ function writeFitted(ctx, text, box, maxSize, opts = {}) {
 }
 
 
+
+const PIXEL_FONT = {
+  "0": ["111","101","101","101","101","101","111"],
+  "1": ["010","110","010","010","010","010","111"],
+  "2": ["111","001","001","111","100","100","111"],
+  "3": ["111","001","001","111","001","001","111"],
+  "4": ["101","101","101","111","001","001","001"],
+  "5": ["111","100","100","111","001","001","111"],
+  "6": ["111","100","100","111","101","101","111"],
+  "7": ["111","001","001","010","010","010","010"],
+  "8": ["111","101","101","111","101","101","111"],
+  "9": ["111","101","101","111","001","001","111"],
+  "A": ["01110","10001","10001","11111","10001","10001","10001"],
+  "B": ["11110","10001","10001","11110","10001","10001","11110"],
+  "C": ["01111","10000","10000","10000","10000","10000","01111"],
+  "D": ["11110","10001","10001","10001","10001","10001","11110"],
+  "E": ["11111","10000","10000","11110","10000","10000","11111"],
+  "F": ["11111","10000","10000","11110","10000","10000","10000"],
+  "G": ["01111","10000","10000","10111","10001","10001","01111"],
+  "H": ["10001","10001","10001","11111","10001","10001","10001"],
+  "I": ["111","010","010","010","010","010","111"],
+  "J": ["00111","00010","00010","00010","10010","10010","01100"],
+  "K": ["10001","10010","10100","11000","10100","10010","10001"],
+  "L": ["10000","10000","10000","10000","10000","10000","11111"],
+  "M": ["10001","11011","10101","10101","10001","10001","10001"],
+  "N": ["10001","11001","10101","10011","10001","10001","10001"],
+  "O": ["01110","10001","10001","10001","10001","10001","01110"],
+  "P": ["11110","10001","10001","11110","10000","10000","10000"],
+  "Q": ["01110","10001","10001","10001","10101","10010","01101"],
+  "R": ["11110","10001","10001","11110","10100","10010","10001"],
+  "S": ["01111","10000","10000","01110","00001","00001","11110"],
+  "T": ["11111","00100","00100","00100","00100","00100","00100"],
+  "U": ["10001","10001","10001","10001","10001","10001","01110"],
+  "V": ["10001","10001","10001","10001","10001","01010","00100"],
+  "W": ["10001","10001","10001","10101","10101","10101","01010"],
+  "X": ["10001","10001","01010","00100","01010","10001","10001"],
+  "Y": ["10001","10001","01010","00100","00100","00100","00100"],
+  "Z": ["11111","00001","00010","00100","01000","10000","11111"],
+  ".": ["0","0","0","0","0","0","1"],
+  ",": ["0","0","0","0","0","1","1"],
+  ":": ["0","1","1","0","1","1","0"],
+  "/": ["00001","00010","00010","00100","01000","01000","10000"],
+  "-": ["0","0","0","1","0","0","0"],
+  "+": ["000","010","010","111","010","010","000"],
+  "%": ["10001","00010","00100","01000","10000","10001","00000"],
+  "$": ["01110","10100","10100","01110","00101","00101","01110"],
+  "#": ["01010","11111","01010","01010","11111","01010","01010"],
+  "≈": ["0000","0101","1010","0000","0101","1010","0000"],
+  " ": ["0","0","0","0","0","0","0"]
+};
+
+function pixelMeasure(text) {
+  const chars = String(text).toUpperCase().split("");
+  let width = 0;
+  for (const ch of chars) {
+    const glyph = PIXEL_FONT[ch] || PIXEL_FONT[" "];
+    const glyphWidth = Math.max(...glyph.map(row => row.length));
+    width += glyphWidth + 1;
+  }
+  return Math.max(width - 1, 1);
+}
+
+function drawPixelString(ctx, text, x, y, scale, color, alpha = 1) {
+  let cx = x;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  for (const ch of String(text).toUpperCase()) {
+    const glyph = PIXEL_FONT[ch] || PIXEL_FONT[" "];
+    const glyphWidth = Math.max(...glyph.map(row => row.length));
+    for (let row = 0; row < glyph.length; row++) {
+      const bits = glyph[row].padEnd(glyphWidth, "0");
+      for (let col = 0; col < glyphWidth; col++) {
+        if (bits[col] === "1") ctx.fillRect(cx + col * scale, y + row * scale, Math.ceil(scale), Math.ceil(scale));
+      }
+    }
+    cx += (glyphWidth + 1) * scale;
+  }
+  ctx.restore();
+}
+
 function drawGlowText(ctx, text, box, size, opts = {}) {
   const { x, y, w, h } = box;
-  const value = String(text);
-  const family = opts.font || "Arial Black, Impact, Arial";
-  let fontSize = size;
-  const maxWidth = w * 0.92;
+  const value = String(text ?? "").toUpperCase();
+  const pxWidth = pixelMeasure(value);
+  const pxHeight = 7;
+  const requestedScale = Math.max(2, Math.floor(size / 7));
+  const scale = Math.max(2, Math.floor(Math.min(requestedScale, (w * 0.92) / pxWidth, (h * 0.76) / pxHeight)));
+  const textW = pxWidth * scale;
+  const textH = pxHeight * scale;
 
+  let tx = x + (w - textW) / 2;
+  if (opts.align === "left") tx = x;
+  if (opts.align === "right") tx = x + w - textW;
+  const ty = y + (h - textH) / 2 + (opts.offsetY || 0);
+
+  const color = opts.color || "#8DFF35";
   ctx.save();
-  ctx.textAlign = opts.align || "center";
-  ctx.textBaseline = "middle";
-
-  while (fontSize > 18) {
-    ctx.font = `${opts.weight || "900"} ${fontSize}px ${family}`;
-    if (ctx.measureText(value).width <= maxWidth) break;
-    fontSize -= 3;
-  }
-
-  const tx = opts.align === "left" ? x : opts.align === "right" ? x + w : x + w / 2;
-  const ty = y + h / 2 + (opts.offsetY || 0);
-
-  ctx.lineWidth = opts.strokeWidth ?? Math.max(4, Math.round(fontSize * 0.07));
-  ctx.strokeStyle = opts.stroke || "rgba(0,0,0,0.92)";
-  ctx.fillStyle = opts.color || "#8DFF35";
   ctx.shadowColor = opts.shadow || "rgba(77,255,35,0.75)";
   ctx.shadowBlur = opts.blur ?? 14;
 
-  if (ctx.lineWidth > 0) ctx.strokeText(value, tx, ty);
-  ctx.fillText(value, tx, ty);
+  const strokeColor = opts.stroke || "rgba(0,0,0,0.92)";
+  const stroke = Math.max(1, Math.round(scale * 0.45));
+  drawPixelString(ctx, value, tx - stroke, ty, scale, strokeColor, 0.95);
+  drawPixelString(ctx, value, tx + stroke, ty, scale, strokeColor, 0.95);
+  drawPixelString(ctx, value, tx, ty - stroke, scale, strokeColor, 0.95);
+  drawPixelString(ctx, value, tx, ty + stroke, scale, strokeColor, 0.95);
+  drawPixelString(ctx, value, tx, ty, scale, color, 1);
   ctx.restore();
 }
+
 
 function coverProgressBarArea(ctx) {
   // New template already has a decorative bar baked in. We cover only the inner slots
@@ -626,7 +707,28 @@ function walletButtons() {
   return Markup.inlineKeyboard(rows);
 }
 
-function extractBaseScanField(lines, label) {
+
+function stripHtmlNoise(text = "") {
+  return String(text)
+    .replace(/\u00a0/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractMoneyAfterLabel(text, label) {
+  const safeLabel = String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`${safeLabel}\\s*[:\\-]?\\s*(\\$\\s*[0-9][0-9,.]*(?:\\s*[KMB])?)`, "i");
+  return stripHtmlNoise(text).match(re)?.[1] || null;
+}
+
+function extractNumberAfterLabel(text, label) {
+  const safeLabel = String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`${safeLabel}\\s*[:\\-]?\\s*([0-9][0-9,]*)`, "i");
+  return stripHtmlNoise(text).match(re)?.[1] || null;
+}
+
+function extractBaseScanField(lines, label, validator = () => true) {
   const wanted = String(label).toLowerCase();
   const stopLabel = /^(max total supply|holders|transfers|market|price|onchain market cap|circulating supply market cap|fully diluted market cap|other info|contract|decimals|official site|social profiles)$/i;
 
@@ -634,18 +736,16 @@ function extractBaseScanField(lines, label) {
     const line = lines[i];
     const lower = line.toLowerCase();
 
-    if (lower === wanted) {
-      for (let j = i + 1; j < Math.min(lines.length, i + 10); j++) {
+    if (lower === wanted || lower.startsWith(wanted + " ") || lower.startsWith(wanted + ":")) {
+      const inlineValue = line.slice(label.length).replace(/^\s*:\s*/, "").trim();
+      if (inlineValue && validator(inlineValue)) return inlineValue;
+
+      for (let j = i + 1; j < Math.min(lines.length, i + 16); j++) {
         const candidate = lines[j];
         if (!candidate) continue;
-        if (stopLabel.test(candidate)) break;
-        return candidate;
+        if (stopLabel.test(candidate) && candidate.toLowerCase() !== wanted) continue;
+        if (validator(candidate)) return candidate;
       }
-    }
-
-    if (lower.startsWith(wanted + " ") || lower.startsWith(wanted + ":")) {
-      const inlineValue = line.slice(label.length).replace(/^\s*:\s*/, "").trim();
-      if (inlineValue) return inlineValue;
     }
   }
 
@@ -653,17 +753,17 @@ function extractBaseScanField(lines, label) {
 }
 
 function normalizeBaseScanPrice(value) {
-  const m = String(value || "").match(/\$\s*[0-9][0-9,]*(?:\.[0-9]+)?/);
+  const m = stripHtmlNoise(value).match(/\$\s*[0-9][0-9,]*(?:\.[0-9]+)?(?:\s*[KMB])?/i);
   return m ? m[0].replace(/\s+/g, "") : "N/A";
 }
 
 function normalizeBaseScanMoney(value) {
-  const m = String(value || "").match(/\$\s*[0-9][0-9,]*(?:\.[0-9]+)?/);
+  const m = stripHtmlNoise(value).match(/\$\s*[0-9][0-9,]*(?:\.[0-9]+)?(?:\s*[KMB])?/i);
   return m ? m[0].replace(/\s+/g, "") : "N/A";
 }
 
 function normalizeBaseScanHolders(value) {
-  const m = String(value || "").match(/[0-9][0-9,]*/);
+  const m = stripHtmlNoise(value).match(/[0-9][0-9,]*/);
   return m ? m[0] : "N/A";
 }
 
@@ -695,6 +795,7 @@ async function scrapeBaseScanTokenData() {
     headers: {
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
       "accept": "text/html,application/xhtml+xml,text/plain,*/*",
+      "accept-language": "en-US,en;q=0.9",
       "cache-control": "no-cache",
       "pragma": "no-cache"
     }
@@ -705,24 +806,28 @@ async function scrapeBaseScanTokenData() {
   const html = await res.text();
   const $ = load(html);
   const bodyText = $("body").text().replace(/\u00a0/g, " ");
+  const flatText = stripHtmlNoise(bodyText);
   const lines = bodyText
     .split(/\n+/)
     .map(v => v.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
   const priceRaw =
-    extractBaseScanField(lines, "Price") ||
-    bodyText.match(/Price\s*:?\s*(\$\s*[0-9][0-9,]*(?:\.[0-9]+)?)/i)?.[1];
+    extractMoneyAfterLabel(flatText, "Price") ||
+    extractBaseScanField(lines, "Price", v => /\$\s*[0-9]/.test(v));
 
   const holdersRaw =
-    extractBaseScanField(lines, "Holders") ||
-    bodyText.match(/Holders\s*:?\s*([0-9][0-9,]*)/i)?.[1];
+    flatText.match(/Holders\s+([0-9][0-9,]*)\s*\(/i)?.[1] ||
+    extractNumberAfterLabel(flatText, "Holders") ||
+    extractBaseScanField(lines, "Holders", v => /^[0-9][0-9,]*(?:\s|\(|$)/.test(v));
 
   const marketCapRaw =
-    extractBaseScanField(lines, "Onchain Market Cap") ||
-    extractBaseScanField(lines, "Circulating Supply Market Cap") ||
-    extractBaseScanField(lines, "Fully Diluted Market Cap") ||
-    bodyText.match(/(?:Onchain Market Cap|Circulating Supply Market Cap|Fully Diluted Market Cap)\s*:?\s*(\$\s*[0-9][0-9,]*(?:\.[0-9]+)?)/i)?.[1];
+    extractMoneyAfterLabel(flatText, "Onchain Market Cap") ||
+    extractMoneyAfterLabel(flatText, "Circulating Supply Market Cap") ||
+    extractMoneyAfterLabel(flatText, "Fully Diluted Market Cap") ||
+    extractBaseScanField(lines, "Onchain Market Cap", v => /\$\s*[0-9]/.test(v)) ||
+    extractBaseScanField(lines, "Circulating Supply Market Cap", v => /\$\s*[0-9]/.test(v)) ||
+    extractBaseScanField(lines, "Fully Diluted Market Cap", v => /\$\s*[0-9]/.test(v));
 
   return {
     priceUsd: normalizeBaseScanPrice(priceRaw),
@@ -731,14 +836,55 @@ async function scrapeBaseScanTokenData() {
   };
 }
 
+async function getDexScreenerTokenData() {
+  const token = env.DRB_TOKEN_ADDRESS || DEFAULT_DRB_TOKEN_ADDRESS;
+  const url = env.DEXSCREENER_TOKEN_API || `https://api.dexscreener.com/latest/dex/tokens/${token}`;
+  const res = await fetchWithTimeout(url, {
+    headers: {
+      "user-agent": "Mozilla/5.0 grokamotos-bot",
+      "accept": "application/json"
+    }
+  }, envNum("DEX_TIMEOUT_MS", 10000));
+  if (!res.ok) throw new Error(`DexScreener token API failed: ${res.status}`);
+
+  const json = await res.json();
+  const pairs = Array.isArray(json?.pairs) ? json.pairs : [];
+  const basePairs = pairs.filter(p => String(p?.chainId || "").toLowerCase() === "base");
+  const candidates = basePairs.length ? basePairs : pairs;
+  const best = candidates.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0];
+
+  return {
+    priceUsd: formatUsdPrice(best?.priceUsd),
+    marketCap: formatUsdMarketCap(best?.marketCap || best?.fdv),
+    holders: "N/A"
+  };
+}
+
 async function getDrbMarketData() {
+  let baseScan = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
+  let dex = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
+
   try {
-    return await scrapeBaseScanTokenData();
+    baseScan = await scrapeBaseScanTokenData();
   } catch (e) {
     console.error("BaseScan token scrape error:", e.message);
-    return { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
   }
+
+  if (baseScan.priceUsd === "N/A" || baseScan.marketCap === "N/A") {
+    try {
+      dex = await getDexScreenerTokenData();
+    } catch (e) {
+      console.error("DexScreener fallback error:", e.message);
+    }
+  }
+
+  return {
+    priceUsd: baseScan.priceUsd !== "N/A" ? baseScan.priceUsd : dex.priceUsd,
+    marketCap: baseScan.marketCap !== "N/A" ? baseScan.marketCap : dex.marketCap,
+    holders: baseScan.holders
+  };
 }
+
 
 function walletCaption(market) {
   return [
