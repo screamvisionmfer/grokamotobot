@@ -843,6 +843,33 @@ async function scrapeBaseScanTokenData() {
   };
 }
 
+function findBestDexPair(pairs, tokenAddress) {
+  const token = String(tokenAddress || "").toLowerCase();
+  const configuredPair = String(env.DRB_DEX_URL || "").match(/0x[a-fA-F0-9]{40}/)?.[0]?.toLowerCase();
+
+  const valid = (Array.isArray(pairs) ? pairs : [])
+    .filter(p => String(p?.chainId || "").toLowerCase() === "base")
+    .filter(p => {
+      const base = String(p?.baseToken?.address || "").toLowerCase();
+      const quote = String(p?.quoteToken?.address || "").toLowerCase();
+      return base === token || quote === token;
+    });
+
+  if (!valid.length) return null;
+
+  // Prefer the exact pair from DRB_DEX_URL if it exists.
+  if (configuredPair) {
+    const exact = valid.find(p => String(p?.pairAddress || "").toLowerCase() === configuredPair);
+    if (exact) return exact;
+  }
+
+  // priceUsd in DexScreener pair data is most reliable when DRB is baseToken.
+  const drbAsBase = valid.filter(p => String(p?.baseToken?.address || "").toLowerCase() === token);
+  const candidates = drbAsBase.length ? drbAsBase : valid;
+
+  return [...candidates].sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0];
+}
+
 async function getDexScreenerTokenData() {
   const token = getDrbTokenAddress();
   const url = env.DEXSCREENER_TOKEN_API || `https://api.dexscreener.com/latest/dex/tokens/${token}`;
@@ -855,14 +882,14 @@ async function getDexScreenerTokenData() {
   if (!res.ok) throw new Error(`DexScreener token API failed: ${res.status}`);
 
   const json = await res.json();
-  const pairs = Array.isArray(json?.pairs) ? json.pairs : [];
-  const basePairs = pairs.filter(p => String(p?.chainId || "").toLowerCase() === "base");
-  const candidates = basePairs.length ? basePairs : pairs;
-  const best = candidates.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0];
+  const best = findBestDexPair(json?.pairs, token);
+  if (!best) throw new Error("No valid Base DRB pair found on DexScreener");
+
+  const marketCap = best?.marketCap ?? best?.fdv;
 
   return {
     priceUsd: formatUsdPrice(best?.priceUsd),
-    marketCap: formatUsdMarketCap(best?.marketCap || best?.fdv),
+    marketCap: formatUsdMarketCap(marketCap),
     holders: "N/A"
   };
 }
@@ -897,36 +924,37 @@ async function getBlockScoutTokenData() {
 }
 
 async function getDrbMarketData() {
-  let baseScan = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
+  // BaseScan HTML is unstable and may expose ETH price near the token data.
+  // Therefore DRB price + market cap are always taken from DexScreener.
+  // Holders are taken from Blockscout first, then BaseScan as fallback.
   let dex = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
   let blockScout = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
+  let baseScan = { priceUsd: "N/A", marketCap: "N/A", holders: "N/A" };
 
   try {
-    baseScan = await scrapeBaseScanTokenData();
+    dex = await getDexScreenerTokenData();
   } catch (e) {
-    console.error("BaseScan token scrape error:", e.message);
+    console.error("DexScreener market data error:", e.message);
   }
 
-  if (baseScan.priceUsd === "N/A" || baseScan.marketCap === "N/A") {
-    try {
-      dex = await getDexScreenerTokenData();
-    } catch (e) {
-      console.error("DexScreener fallback error:", e.message);
-    }
+  try {
+    blockScout = await getBlockScoutTokenData();
+  } catch (e) {
+    console.error("Blockscout token info error:", e.message);
   }
 
-  if (baseScan.holders === "N/A" || (baseScan.priceUsd === "N/A" && dex.priceUsd === "N/A") || (baseScan.marketCap === "N/A" && dex.marketCap === "N/A")) {
+  if (blockScout.holders === "N/A") {
     try {
-      blockScout = await getBlockScoutTokenData();
+      baseScan = await scrapeBaseScanTokenData();
     } catch (e) {
-      console.error("Blockscout fallback error:", e.message);
+      console.error("BaseScan token scrape error:", e.message);
     }
   }
 
   return {
-    priceUsd: baseScan.priceUsd !== "N/A" ? baseScan.priceUsd : (dex.priceUsd !== "N/A" ? dex.priceUsd : blockScout.priceUsd),
-    marketCap: baseScan.marketCap !== "N/A" ? baseScan.marketCap : (dex.marketCap !== "N/A" ? dex.marketCap : blockScout.marketCap),
-    holders: baseScan.holders !== "N/A" ? baseScan.holders : blockScout.holders
+    priceUsd: dex.priceUsd !== "N/A" ? dex.priceUsd : blockScout.priceUsd,
+    marketCap: dex.marketCap !== "N/A" ? dex.marketCap : blockScout.marketCap,
+    holders: blockScout.holders !== "N/A" ? blockScout.holders : baseScan.holders
   };
 }
 
